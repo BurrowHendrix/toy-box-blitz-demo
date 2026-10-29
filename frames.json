@@ -1,0 +1,36 @@
+{
+  "idle": [
+    "frames/idle_0.png"
+  ],
+  "run_n": [
+    "frames/run_n_0.png",
+    "frames/run_n_1.png"
+  ],
+  "run_e": [
+    "frames/run_e_0.png"
+  ],
+  "run_w": [
+    "frames/run_w_0.png"
+  ],
+  "run_s": [
+    "frames/run_s_0.png"
+  ],
+  "juke": [
+    "frames/juke_0.png"
+  ],
+  "spin": [
+    "frames/spin_0.png"
+  ],
+  "run_ne": [
+    "frames/run_ne_0.png"
+  ],
+  "run_nw": [
+    "frames/run_nw_0.png"
+  ],
+  "run_se": [
+    "frames/run_se_0.png"
+  ],
+  "run_sw": [
+    "frames/run_sw_0.png"
+  ]
+}
