@@ -1,20 +1,15 @@
-# Toy Box Blitz — Player Demo
+# Toy Box Blitz — Player Control Demo
 
-Original arcade football control demo (not affiliated with NFL, Midway, EA, or any league).
+Original arcade-style browser football demo (no NFL/Midway/EA IP).
 
-## Play
+**Live:** https://burrowhendrix.github.io/toy-box-blitz-demo/
 
-Open the GitHub Pages site, click **PLAY**, then:
-
-- **WASD / Arrow keys** — move (8 directions)
-- **Shift / Space** — turbo (drains bar)
+## Controls
+- **WASD / Arrows** — move
+- **Shift / Space** — turbo
 - **E** — juke
 - **Q** — spin
-- Reach the far teal **BLITZ** end zone for a touchdown
+- Reach the far **TOY BOX BLITZ** end zone for a TD
 
-## Local
-
-```bash
-python3 -m http.server 8765
-# open http://localhost:8765/
-```
+## Stack
+Three.js 0.170, sprite sheets (per-frame PNGs), procedural field texture.
