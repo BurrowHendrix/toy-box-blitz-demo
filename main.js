@@ -11,8 +11,6 @@ const scoreHome = document.getElementById('scoreHome');
 const YARDS = { width: 53.33, length: 120 };
 const FIELD_HALF_LEN = YARDS.length / 2;
 const FIELD_HALF_W = YARDS.width / 2;
-
-// Sprite world height ~2.2 yards (player ~2 yd tall); width matched to square frames
 const SPRITE_H = 1.85;
 const SPRITE_W = 1.85;
 
@@ -30,12 +28,10 @@ if (new URLSearchParams(location.search).has('autoplay')) {
 }
 if (new URLSearchParams(location.search).has('nearfar')) {
   titleEl.style.display = 'none'; playing = true;
-  // snap after load
   window.addEventListener('load', () => { setTimeout(() => { if (window.__tb) { window.__tb.player.z = 42; window.__tb.player.x = 0; } }, 100); });
 }
 const __topdown = new URLSearchParams(location.search).has('topdown');
 let __qaCam = null;
-
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -79,13 +75,11 @@ function makeField() {
   tex.flipY = true;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  // NO UV Y-flip — texture is authored with image top = near (−Z), bottom = far (+Z)
   const geo = new THREE.PlaneGeometry(YARDS.width, YARDS.length);
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex }));
   mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // Sideline track / apron
   const track = new THREE.Mesh(
     new THREE.PlaneGeometry(YARDS.width + 14, YARDS.length + 10),
     new THREE.MeshLambertMaterial({ color: 0x2c2c2c })
@@ -94,7 +88,6 @@ function makeField() {
   track.position.y = -0.03;
   scene.add(track);
 
-  // Painted sideline strip (subtle)
   for (const sx of [-1, 1]) {
     const strip = new THREE.Mesh(
       new THREE.PlaneGeometry(3.5, YARDS.length),
@@ -133,13 +126,11 @@ function makeField() {
   goalPost(50);
   goalPost(-50);
 
-  // Team benches along both sidelines
   makeBench(-FIELD_HALF_W - 3.2, -15, 18);
   makeBench(-FIELD_HALF_W - 3.2, 15, 18);
   makeBench(FIELD_HALF_W + 3.2, -15, 18);
   makeBench(FIELD_HALF_W + 3.2, 15, 18);
 
-  // Thin on-field LOS / first-down only (never a HUD bar)
   const los = new THREE.Mesh(
     new THREE.PlaneGeometry(YARDS.width - 2, 0.12),
     new THREE.MeshBasicMaterial({ color: 0xffe000, transparent: true, opacity: 0.85, depthWrite: false })
@@ -154,7 +145,6 @@ function makeField() {
 }
 const { los, fd } = makeField();
 
-// Selection circle — sized for ~2 yd player, centered under feet
 const CIRCLE_R = 0.55;
 const playerCircle = new THREE.Mesh(
   new THREE.RingGeometry(CIRCLE_R * 0.82, CIRCLE_R, 48),
@@ -167,9 +157,31 @@ const circleFill = new THREE.Mesh(
 );
 circleFill.rotation.x = -Math.PI / 2; circleFill.position.y = 0.035; scene.add(circleFill);
 
+// Ground shadow (separates during hurdle)
+const shadowMat = new THREE.MeshBasicMaterial({
+  color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide,
+});
+const playerShadow = new THREE.Mesh(new THREE.CircleGeometry(0.42, 24), shadowMat);
+playerShadow.rotation.x = -Math.PI / 2;
+playerShadow.position.y = 0.03;
+playerShadow.renderOrder = 5;
+scene.add(playerShadow);
+
+const MOVE_SPEC = {
+  juke:   { dur: 0.40, frames: 6, anim: 'juke' },
+  spin:   { dur: 0.50, frames: 8, anim: 'spin' },
+  stiff:  { dur: 0.45, frames: 6, anim: 'stiff' },
+  hurdle: { dur: 0.55, frames: 8, anim: 'hurdle' },
+  celeb:  { dur: 0.70, frames: 6, anim: 'celeb' },
+};
+
+const HURDLE_LIFT = [0, 0.25, 0.7, 1.15, 1.1, 0.65, 0.2, 0];
+
 const player = {
-  x: 0, z: -25, vx: 0, vz: 0, facing: 'n', turbo: 1,
-  anim: 'idle', frame: 0, frameT: 0, specialT: 0, special: null,
+  x: 0, z: -25, vx: 0, vz: 0, facing: 'n', facingPrev: 'n',
+  turbo: 1, anim: 'idle', frame: 0, frameT: 0,
+  special: null, specialT: 0, specialDur: 0,
+  turnT: 0, spriteY: 0, celebPending: false,
 };
 
 const frameTex = {};
@@ -177,21 +189,17 @@ const frameMeta = {};
 let currentAnim = 'idle', currentFrame = 0;
 
 const spriteMat = new THREE.SpriteMaterial({
-  transparent: true,
-  depthWrite: false,
-  depthTest: true,
-  alphaTest: 0.08,
-  sizeAttenuation: true,
-  color: 0xffffff,
+  transparent: true, depthWrite: false, depthTest: true,
+  alphaTest: 0.08, sizeAttenuation: true, color: 0xffffff,
 });
 const spriteMesh = new THREE.Sprite(spriteMat);
 spriteMesh.scale.set(SPRITE_W, SPRITE_H, 1);
-spriteMesh.center.set(0.5, 0.0); // feet on ground
+spriteMesh.center.set(0.5, 0.0);
 spriteMesh.renderOrder = 20;
 scene.add(spriteMesh);
 
 async function loadFrames() {
-  const meta = await (await fetch('./frames.json')).json();
+  const meta = await (await fetch('./frames.json?v=2d6018f')).json();
   Object.assign(frameMeta, meta);
   const jobs = [];
   for (const [anim, paths] of Object.entries(meta)) {
@@ -217,10 +225,7 @@ async function loadFrames() {
 function setAnimFrame(animKey, frameIndex) {
   let list = frameTex[animKey];
   if (!list || !list.length) {
-    // fallback diagonals → nearest cardinal / run_n
-    const fb = {
-      run_ne: 'run_n', run_nw: 'run_n', run_se: 'run_s', run_sw: 'run_s',
-    };
+    const fb = { run_ne: 'run_n', run_nw: 'run_n', run_se: 'run_s', run_sw: 'run_s' };
     list = frameTex[fb[animKey]] || frameTex.run_n || frameTex.idle;
   }
   if (!list || !list.length) return;
@@ -251,90 +256,180 @@ function facingFromDir(dx, dz) {
   return map[String(oct)] || 'n';
 }
 
+const PERP = {
+  n: [1, 0], s: [-1, 0], e: [0, -1], w: [0, 1],
+  ne: [0.7, -0.7], nw: [0.7, 0.7], se: [-0.7, -0.7], sw: [-0.7, 0.7],
+};
+
 let homeScore = 0, tdCooldown = 0;
 function resetPlayer() {
   player.x = 0; player.z = -25; player.vx = 0; player.vz = 0;
-  player.facing = 'n'; player.special = null;
+  player.facing = 'n'; player.facingPrev = 'n';
+  player.special = null; player.spriteY = 0; player.celebPending = false;
   player.turbo = Math.max(player.turbo, 0.55);
   los.position.z = -20; fd.position.z = -10;
   document.getElementById('banner').textContent = '1st & 10';
 }
 function showTD() {
   homeScore += 7; scoreHome.textContent = String(homeScore);
-  tdEl.classList.add('show'); tdCooldown = 2.2;
-  setTimeout(() => { tdEl.classList.remove('show'); resetPlayer(); }, 1800);
+  tdEl.classList.add('show'); tdCooldown = 2.4;
+  player.special = 'celeb';
+  player.specialDur = MOVE_SPEC.celeb.dur;
+  player.specialT = MOVE_SPEC.celeb.dur;
+  player.frame = 0; player.frameT = 0;
+  player.vx = 0; player.vz = 0;
+  setTimeout(() => { tdEl.classList.remove('show'); resetPlayer(); }, 2000);
+}
+
+function startSpecial(name) {
+  const spec = MOVE_SPEC[name];
+  if (!spec) return;
+  player.special = name;
+  player.specialDur = spec.dur;
+  player.specialT = spec.dur;
+  player.frame = 0;
+  player.frameT = 0;
+
+  if (name === 'juke') {
+    const p = PERP[player.facing] || [1, 0];
+    player.vx = player.vx * 0.7 + p[0] * 16;
+    player.vz = player.vz * 0.7 + p[1] * 16;
+  } else if (name === 'spin') {
+    player.vx *= 1.15; player.vz *= 1.15;
+  } else if (name === 'stiff') {
+    const spd = Math.hypot(player.vx, player.vz) || 8;
+    const fx = ({ n:0,s:0,e:1,w:-1,ne:0.7,nw:-0.7,se:0.7,sw:-0.7 })[player.facing] || 0;
+    const fz = ({ n:1,s:-1,e:0,w:0,ne:0.7,nw:0.7,se:-0.7,sw:-0.7 })[player.facing] || 1;
+    player.vx += fx * 4; player.vz += fz * 4;
+  } else if (name === 'hurdle') {
+    player.vx *= 1.05; player.vz *= 1.05;
+  }
 }
 
 const BASE_SPEED = 14, TURBO_MULT = 1.65, ACCEL = 55, FRICTION = 28;
 
 function updatePlayer(dt) {
   if (!playing) return;
-  if (tdCooldown > 0) { tdCooldown -= dt; return; }
+  if (tdCooldown > 0) {
+    tdCooldown -= dt;
+    // still advance celeb anim
+  } else if (tdCooldown <= 0 && player.special === 'celeb') {
+    player.special = null;
+  }
 
-  if (!player.special) {
-    if (keys.has('KeyE')) {
-      player.special = 'juke'; player.specialT = 0.35;
-      const perp = { n: [1, 0], s: [-1, 0], e: [0, -1], w: [0, 1], ne: [0.7, -0.7], nw: [0.7, 0.7], se: [-0.7, -0.7], sw: [-0.7, 0.7] };
-      const p = perp[player.facing] || [1, 0];
-      player.vx += p[0] * 18; player.vz += p[1] * 18;
-    } else if (keys.has('KeyQ')) {
-      player.special = 'spin'; player.specialT = 0.45;
-      player.vx *= 1.2; player.vz *= 1.2;
-    }
-  } else {
+  if (!player.special && tdCooldown <= 0) {
+    if (keys.has('KeyE')) startSpecial('juke');
+    else if (keys.has('KeyQ')) startSpecial('spin');
+    else if (keys.has('KeyF')) startSpecial('stiff');
+    else if (keys.has('KeyR') || keys.has('KeyC')) startSpecial('hurdle');
+  }
+
+  if (player.special) {
     player.specialT -= dt;
-    if (player.specialT <= 0) player.special = null;
+    const spec = MOVE_SPEC[player.special];
+    const nF = (frameMeta[spec.anim] || []).length || spec.frames;
+    const elapsed = spec.dur - player.specialT;
+    const fi = Math.min(nF - 1, Math.floor((elapsed / spec.dur) * nF));
+    player.frame = fi;
+    player.anim = spec.anim;
+
+    if (player.special === 'hurdle') {
+      const t = Math.max(0, Math.min(1, elapsed / spec.dur));
+      const idx = Math.min(HURDLE_LIFT.length - 1, Math.floor(t * HURDLE_LIFT.length));
+      const nidx = Math.min(HURDLE_LIFT.length - 1, idx + 1);
+      const frac = (t * HURDLE_LIFT.length) - idx;
+      player.spriteY = HURDLE_LIFT[idx] * (1 - frac) + HURDLE_LIFT[nidx] * frac;
+    } else {
+      player.spriteY = 0;
+    }
+
+    if (player.specialT <= 0) {
+      const was = player.special;
+      player.special = null;
+      player.spriteY = 0;
+      // resume run at contact frame
+      player.frame = (was === 'spin' || was === 'juke') ? 0 : player.frame % 8;
+      player.frameT = 0;
+    }
   }
 
   const { dx, dz } = dirFromInput();
   const turboHeld = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('Space');
   let usingTurbo = false;
-  if (turboHeld && player.turbo > 0.02 && (dx || dz)) {
+  if (turboHeld && player.turbo > 0.02 && (dx || dz) && !player.special) {
     usingTurbo = true; player.turbo = Math.max(0, player.turbo - dt * 0.45);
-  } else {
+  } else if (!player.special) {
     player.turbo = Math.min(1, player.turbo + dt * 0.22);
   }
   turboFill.style.width = `${(player.turbo * 100).toFixed(1)}%`;
 
   const moving = dx !== 0 || dz !== 0;
-  if (moving && !player.special) player.facing = facingFromDir(dx, dz);
+  if (moving && !player.special && tdCooldown <= 0) {
+    const nf = facingFromDir(dx, dz);
+    if (nf !== player.facing) {
+      player.facingPrev = player.facing;
+      player.facing = nf;
+      player.turnT = 0.08; // short turn blend
+    }
+  }
 
   const speed = BASE_SPEED * (usingTurbo ? TURBO_MULT : 1);
   let tx = 0, tz = 0;
-  if (moving) {
+  if (moving && !player.special && tdCooldown <= 0) {
     const len = Math.hypot(dx, dz) || 1;
     tx = (dx / len) * speed; tz = (dz / len) * speed;
+  } else if (player.special === 'juke' || player.special === 'spin' || player.special === 'hurdle' || player.special === 'stiff') {
+    // keep momentum; light friction
+    tx = player.vx; tz = player.vz;
   }
   const ax = tx - player.vx, az = tz - player.vz;
-  const maxA = moving ? ACCEL : FRICTION;
+  const maxA = (moving && !player.special) ? ACCEL : FRICTION * (player.special ? 0.35 : 1);
   const al = Math.hypot(ax, az);
-  if (al > 0.001) {
+  if (al > 0.001 && tdCooldown <= 0) {
     const s = Math.min(1, (maxA * dt) / al);
     player.vx += ax * s; player.vz += az * s;
   }
-  player.x += player.vx * dt; player.z += player.vz * dt;
+  if (tdCooldown <= 0 || player.special === 'celeb') {
+    player.x += player.vx * dt; player.z += player.vz * dt;
+  }
   const maxX = FIELD_HALF_W - 1.2, maxZ = FIELD_HALF_LEN - 1.5;
   player.x = Math.max(-maxX, Math.min(maxX, player.x));
   player.z = Math.max(-maxZ, Math.min(maxZ, player.z));
   if (player.z >= 50 && tdCooldown <= 0) showTD();
 
-  // Keep first-down marker on the field ahead of the ball (never a bottom HUD bar)
   const ballZ = player.z;
   if (fd.position.z < ballZ - 0.5) {
-    // player crossed FD — roll a new 10 yd marker ahead
     los.position.z = ballZ;
     fd.position.z = Math.min(50, ballZ + 10);
   }
 
-  if (player.special === 'juke') { player.anim = 'juke'; player.frame = 0; }
-  else if (player.special === 'spin') { player.anim = 'spin'; player.frame = 0; }
-  else if (moving || Math.hypot(player.vx, player.vz) > 1.5) {
-    player.anim = 'run_' + player.facing;
-    const spd = Math.hypot(player.vx, player.vz);
-    const count = (frameMeta[player.anim] || frameMeta.run_n || [1]).length;
-    player.frameT += dt * (5.5 + spd * 0.4) * (count >= 4 ? 1.15 : 1);
-    if (player.frameT >= 1) { player.frameT = 0; player.frame = (player.frame + 1) % Math.max(1, count); }
-  } else { player.anim = 'idle'; player.frame = 0; }
+  // Animation selection when not in special
+  if (!player.special) {
+    player.spriteY = 0;
+    if (player.turnT > 0) {
+      player.turnT -= dt;
+      player.anim = 'run_' + player.facingPrev;
+    } else if (moving || Math.hypot(player.vx, player.vz) > 1.5) {
+      player.anim = 'run_' + player.facing;
+      const spd = Math.hypot(player.vx, player.vz);
+      const count = (frameMeta[player.anim] || frameMeta.run_n || [1]).length;
+      const turboBoost = usingTurbo ? 0.35 : 0;
+      const cadence = (5.5 + spd * 0.45) * (0.85 + turboBoost) * (count >= 6 ? 1.1 : 1);
+      player.frameT += dt * cadence;
+      if (player.frameT >= 1) {
+        player.frameT = 0;
+        player.frame = (player.frame + 1) % Math.max(1, count);
+      }
+    } else {
+      player.anim = 'idle';
+      const count = (frameMeta.idle || [1]).length;
+      player.frameT += dt * 3.2;
+      if (player.frameT >= 1) {
+        player.frameT = 0;
+        player.frame = (player.frame + 1) % Math.max(1, count);
+      }
+    }
+  }
   setAnimFrame(player.anim, player.frame);
 }
 
@@ -360,10 +455,16 @@ function updateCamera(dt) {
 }
 
 function syncMeshes() {
-  spriteMesh.position.set(player.x, 0.02, player.z);
+  spriteMesh.position.set(player.x, 0.02 + player.spriteY, player.z);
   playerCircle.position.x = player.x; playerCircle.position.z = player.z;
   circleFill.position.x = player.x; circleFill.position.z = player.z;
   playerCircle.scale.setScalar(1 + Math.sin(performance.now() * 0.01) * 0.03);
+  // Shadow stays on ground; shrinks / offsets when airborne
+  playerShadow.position.x = player.x;
+  playerShadow.position.z = player.z - player.spriteY * 0.15;
+  const sh = Math.max(0.45, 1 - player.spriteY * 0.35);
+  playerShadow.scale.setScalar(sh);
+  shadowMat.opacity = 0.35 * sh;
 }
 
 let last = performance.now(), frames = 0, fpsT = 0;
@@ -376,7 +477,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-window.__tb = { player, camera, scene, spriteMesh, frameTex, setAnimFrame };
+window.__tb = { player, camera, scene, spriteMesh, frameTex, setAnimFrame, startSpecial };
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;

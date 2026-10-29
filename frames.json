@@ -1,6 +1,9 @@
 {
   "idle": [
-    "frames/idle_0.png"
+    "frames/idle_0.png",
+    "frames/idle_1.png",
+    "frames/idle_2.png",
+    "frames/idle_3.png"
   ],
   "run_n": [
     "frames/run_n_0.png",
@@ -8,33 +11,122 @@
     "frames/run_n_2.png",
     "frames/run_n_3.png",
     "frames/run_n_4.png",
-    "frames/run_n_5.png"
+    "frames/run_n_5.png",
+    "frames/run_n_6.png",
+    "frames/run_n_7.png"
   ],
   "run_ne": [
-    "frames/run_ne_0.png"
+    "frames/run_ne_0.png",
+    "frames/run_ne_1.png",
+    "frames/run_ne_2.png",
+    "frames/run_ne_3.png",
+    "frames/run_ne_4.png",
+    "frames/run_ne_5.png",
+    "frames/run_ne_6.png",
+    "frames/run_ne_7.png"
   ],
   "run_e": [
-    "frames/run_e_0.png"
+    "frames/run_e_0.png",
+    "frames/run_e_1.png",
+    "frames/run_e_2.png",
+    "frames/run_e_3.png",
+    "frames/run_e_4.png",
+    "frames/run_e_5.png",
+    "frames/run_e_6.png",
+    "frames/run_e_7.png"
   ],
   "run_se": [
-    "frames/run_se_0.png"
+    "frames/run_se_0.png",
+    "frames/run_se_1.png",
+    "frames/run_se_2.png",
+    "frames/run_se_3.png",
+    "frames/run_se_4.png",
+    "frames/run_se_5.png",
+    "frames/run_se_6.png",
+    "frames/run_se_7.png"
   ],
   "run_s": [
-    "frames/run_s_0.png"
+    "frames/run_s_0.png",
+    "frames/run_s_1.png",
+    "frames/run_s_2.png",
+    "frames/run_s_3.png",
+    "frames/run_s_4.png",
+    "frames/run_s_5.png",
+    "frames/run_s_6.png",
+    "frames/run_s_7.png"
   ],
   "run_sw": [
-    "frames/run_sw_0.png"
+    "frames/run_sw_0.png",
+    "frames/run_sw_1.png",
+    "frames/run_sw_2.png",
+    "frames/run_sw_3.png",
+    "frames/run_sw_4.png",
+    "frames/run_sw_5.png",
+    "frames/run_sw_6.png",
+    "frames/run_sw_7.png"
   ],
   "run_w": [
-    "frames/run_w_0.png"
+    "frames/run_w_0.png",
+    "frames/run_w_1.png",
+    "frames/run_w_2.png",
+    "frames/run_w_3.png",
+    "frames/run_w_4.png",
+    "frames/run_w_5.png",
+    "frames/run_w_6.png",
+    "frames/run_w_7.png"
   ],
   "run_nw": [
-    "frames/run_nw_0.png"
+    "frames/run_nw_0.png",
+    "frames/run_nw_1.png",
+    "frames/run_nw_2.png",
+    "frames/run_nw_3.png",
+    "frames/run_nw_4.png",
+    "frames/run_nw_5.png",
+    "frames/run_nw_6.png",
+    "frames/run_nw_7.png"
   ],
   "juke": [
-    "frames/juke_0.png"
+    "frames/juke_0.png",
+    "frames/juke_1.png",
+    "frames/juke_2.png",
+    "frames/juke_3.png",
+    "frames/juke_4.png",
+    "frames/juke_5.png"
   ],
   "spin": [
-    "frames/spin_0.png"
+    "frames/spin_0.png",
+    "frames/spin_1.png",
+    "frames/spin_2.png",
+    "frames/spin_3.png",
+    "frames/spin_4.png",
+    "frames/spin_5.png",
+    "frames/spin_6.png",
+    "frames/spin_7.png"
+  ],
+  "stiff": [
+    "frames/stiff_0.png",
+    "frames/stiff_1.png",
+    "frames/stiff_2.png",
+    "frames/stiff_3.png",
+    "frames/stiff_4.png",
+    "frames/stiff_5.png"
+  ],
+  "hurdle": [
+    "frames/hurdle_0.png",
+    "frames/hurdle_1.png",
+    "frames/hurdle_2.png",
+    "frames/hurdle_3.png",
+    "frames/hurdle_4.png",
+    "frames/hurdle_5.png",
+    "frames/hurdle_6.png",
+    "frames/hurdle_7.png"
+  ],
+  "celeb": [
+    "frames/celeb_0.png",
+    "frames/celeb_1.png",
+    "frames/celeb_2.png",
+    "frames/celeb_3.png",
+    "frames/celeb_4.png",
+    "frames/celeb_5.png"
   ]
 }
