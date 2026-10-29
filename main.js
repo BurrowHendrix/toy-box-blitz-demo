@@ -68,6 +68,7 @@ function makeBench(x, z, lenAlongZ) {
 
 function makeField() {
   const tex = loader.load('./field_texture.jpg');
+  tex.flipY = false;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   // NO UV Y-flip — texture is authored with image top = near (−Z), bottom = far (+Z)
