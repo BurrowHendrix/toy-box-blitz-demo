@@ -199,7 +199,7 @@ spriteMesh.renderOrder = 20;
 scene.add(spriteMesh);
 
 async function loadFrames() {
-  const meta = await (await fetch('./frames.json?v=9315c10')).json();
+  const meta = await (await fetch('./frames.json?v=748b738')).json();
   Object.assign(frameMeta, meta);
   const jobs = [];
   for (const [anim, paths] of Object.entries(meta)) {
