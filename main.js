@@ -13,8 +13,8 @@ const FIELD_HALF_LEN = YARDS.length / 2;
 const FIELD_HALF_W = YARDS.width / 2;
 
 // Sprite world height ~2.2 yards (player ~2 yd tall); width matched to square frames
-const SPRITE_H = 2.35;
-const SPRITE_W = 2.35;
+const SPRITE_H = 1.85;
+const SPRITE_W = 1.85;
 
 const keys = new Set();
 window.addEventListener('keydown', (e) => {
@@ -28,6 +28,14 @@ startBtn.addEventListener('click', () => { titleEl.style.display = 'none'; playi
 if (new URLSearchParams(location.search).has('autoplay')) {
   titleEl.style.display = 'none'; playing = true;
 }
+if (new URLSearchParams(location.search).has('nearfar')) {
+  titleEl.style.display = 'none'; playing = true;
+  // snap after load
+  window.addEventListener('load', () => { setTimeout(() => { if (window.__tb) { window.__tb.player.z = 42; window.__tb.player.x = 0; } }, 100); });
+}
+const __topdown = new URLSearchParams(location.search).has('topdown');
+let __qaCam = null;
+
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -67,8 +75,8 @@ function makeBench(x, z, lenAlongZ) {
 }
 
 function makeField() {
-  const tex = loader.load('./field_texture.jpg');
-  tex.flipY = false;
+  const tex = loader.load('./field_texture.jpg?v=ez180');
+  tex.flipY = true;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   // NO UV Y-flip — texture is authored with image top = near (−Z), bottom = far (+Z)
@@ -147,7 +155,7 @@ function makeField() {
 const { los, fd } = makeField();
 
 // Selection circle — sized for ~2 yd player, centered under feet
-const CIRCLE_R = 0.72;
+const CIRCLE_R = 0.55;
 const playerCircle = new THREE.Mesh(
   new THREE.RingGeometry(CIRCLE_R * 0.82, CIRCLE_R, 48),
   new THREE.MeshBasicMaterial({ color: 0x2299ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
@@ -331,6 +339,17 @@ function updatePlayer(dt) {
 }
 
 function updateCamera(dt) {
+  if (__topdown) {
+    if (!__qaCam) {
+      const fr = 65;
+      const aspect = innerWidth / innerHeight;
+      __qaCam = new THREE.OrthographicCamera(-fr * aspect, fr * aspect, fr, -fr, 0.5, 300);
+      __qaCam.position.set(0, 150, 0);
+      __qaCam.up.set(0, 0, 1);
+      __qaCam.lookAt(0, 0, 0);
+    }
+    return;
+  }
   camera.up.set(0, 1, 0);
   const ideal = new THREE.Vector3(player.x * 0.15, 14.5, player.z - 16);
   camera.position.lerp(ideal, 1 - Math.pow(0.001, dt));
@@ -353,7 +372,7 @@ function frame(now) {
   last = now; frames++; fpsT += dt;
   if (fpsT >= 0.5) { fpsEl.textContent = `${Math.round(frames / fpsT)} fps`; frames = 0; fpsT = 0; }
   updatePlayer(dt); updateCamera(dt); syncMeshes();
-  renderer.render(scene, camera);
+  renderer.render(scene, __topdown && __qaCam ? __qaCam : camera);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
