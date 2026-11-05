@@ -42,7 +42,7 @@ scene.background = new THREE.Color(0x6ec8ff);
 scene.fog = new THREE.Fog(0x6ec8ff, 85, 180);
 
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.5, 250);
-camera.position.set(0, 16, -43);
+camera.position.set(0, 10.4, -31.5);
 camera.up.set(0, 1, 0);
 
 scene.add(new THREE.HemisphereLight(0xfff2d9, 0x3a5a28, 1.15));
@@ -311,6 +311,15 @@ async function loadPlayer() {
     player, camera, scene, playerRoot, mixer, actions, setAction,
     forceKeys: (codes) => { keys.clear(); for (const c of codes) keys.add(c); },
     clearKeys: () => keys.clear(),
+    resetLook: () => {
+      updateCamera._look = new THREE.Vector3(player.x, LOOK_Y, player.z + LOOK_NORTH_BIAS);
+      camera.position.set(player.x, CAM_HEIGHT, player.z - CAM_BACK);
+      camera.lookAt(updateCamera._look);
+    },
+    sampleNdc: () => {
+      const v = new THREE.Vector3(player.x, 1.0, player.z).project(camera);
+      return { x: v.x, y: v.y, z: v.z, px: player.x, pz: player.z, mode: player.mode };
+    },
   };
 }
 
@@ -446,15 +455,71 @@ function updatePlayer(dt) {
   }
 }
 
+// Game camera: high above, slightly behind (world-south of player). Same arcade angle,
+// tighter distance so #8 reads larger. Snappy XZ follow + velocity look-ahead so the
+// player stays near screen center-low and never runs off the bottom (or any edge).
+const CAM_HEIGHT = 10.4;
+const CAM_BACK = 11.5;       // height/back ≈ 0.90 — same pitch as old 14.5/16
+const LOOK_Y = 0.95;
+const LOOK_AHEAD = 5.5;      // along move / facing
+const LOOK_NORTH_BIAS = 2.0; // keeps player center-low when idle / running north
+const CAM_FOLLOW = 0.000001; // pow base → near-locked follow (was 0.001, lagged south)
+const LOOK_FOLLOW = 0.000001;
+
 function updateCamera(dt) {
   camera.up.set(0, 1, 0);
-  // Game camera: high above, slightly behind (south of) the player — top-down but slightly back
-  const ideal = new THREE.Vector3(player.x * 0.15, 14.5, player.z - 16);
-  camera.position.lerp(ideal, 1 - Math.pow(0.001, dt));
-  const look = new THREE.Vector3(player.x * 0.3, 1.0, player.z + 12);
+
+  const ideal = new THREE.Vector3(player.x, CAM_HEIGHT, player.z - CAM_BACK);
+  const follow = 1 - Math.pow(CAM_FOLLOW, dt);
+  camera.position.lerp(ideal, follow);
+
+  const spd = Math.hypot(player.vx, player.vz);
+  let ax, az;
+  if (spd > 0.8) {
+    ax = player.vx / spd;
+    az = player.vz / spd;
+  } else {
+    ax = Math.sin(player.yaw);
+    az = Math.cos(player.yaw);
+  }
+
+  const look = new THREE.Vector3(
+    player.x + ax * LOOK_AHEAD,
+    LOOK_Y,
+    player.z + az * LOOK_AHEAD + LOOK_NORTH_BIAS,
+  );
   if (!updateCamera._look) updateCamera._look = look.clone();
-  updateCamera._look.lerp(look, 1 - Math.pow(0.0008, dt));
+  updateCamera._look.lerp(look, 1 - Math.pow(LOOK_FOLLOW, dt));
   camera.lookAt(updateCamera._look);
+
+  // Soft framing spring: keep #8 near screen center-low in every direction.
+  // Nudges look target when projection is sane so long south runs never leave frame.
+  if (!updateCamera._ndc) updateCamera._ndc = new THREE.Vector3();
+  const ndc = updateCamera._ndc.set(player.x, 1.0, player.z).project(camera);
+  const sane = ndc.z > -1 && ndc.z < 1 && Math.abs(ndc.x) < 1.5 && Math.abs(ndc.y) < 1.5;
+  if (sane) {
+    const TARGET_Y = -0.30; // center-low
+    const dy = ndc.y - TARGET_Y;
+    const dx = ndc.x;
+    // Dead-zone: only correct outside a small band
+    let nudged = false;
+    if (Math.abs(dy) > 0.12) {
+      // +look.z → player moves down on screen with this arcade cam
+      updateCamera._look.z += Math.max(-3.5, Math.min(3.5, dy * 7));
+      nudged = true;
+    }
+    if (Math.abs(dx) > 0.35) {
+      updateCamera._look.x += Math.max(-3.5, Math.min(3.5, dx * 6));
+      nudged = true;
+    }
+    // Hard edge rescue
+    if (ndc.y < -0.72 || ndc.y > 0.55 || Math.abs(ndc.x) > 0.82) {
+      updateCamera._look.x = player.x + dx * -2;
+      updateCamera._look.z = player.z + 4;
+      nudged = true;
+    }
+    if (nudged) camera.lookAt(updateCamera._look);
+  }
 }
 
 function syncMeshes() {
