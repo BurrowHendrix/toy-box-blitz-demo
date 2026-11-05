@@ -31,9 +31,16 @@ if (params.has('autoplay')) {
   titleEl.style.display = 'none'; playing = true;
 }
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight, false);
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, powerPreference: 'high-performance',
+  preserveDrawingBuffer: true, logarithmicDepthBuffer: true,
+});
+function applySize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(innerWidth, innerHeight, false);
+}
+applySize();
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = false;
 
@@ -41,7 +48,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x6ec8ff);
 scene.fog = new THREE.Fog(0x6ec8ff, 85, 180);
 
-const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.5, 250);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.2, 300);
 camera.position.set(0, 10.4, -31.5);
 camera.up.set(0, 1, 0);
 
@@ -73,10 +80,14 @@ function makeField() {
   const tex = texLoader.load('./assets/field_texture.jpg?v=meshy1');
   tex.flipY = true;
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const geo = new THREE.PlaneGeometry(YARDS.width, YARDS.length);
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex }));
   mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0;
   scene.add(mesh);
 
   const track = new THREE.Mesh(
@@ -84,7 +95,7 @@ function makeField() {
     new THREE.MeshLambertMaterial({ color: 0x2c2c2c })
   );
   track.rotation.x = -Math.PI / 2;
-  track.position.y = -0.03;
+  track.position.y = -0.05;
   scene.add(track);
 
   for (const sx of [-1, 1]) {
@@ -93,7 +104,7 @@ function makeField() {
       new THREE.MeshLambertMaterial({ color: 0x3a3a3a })
     );
     strip.rotation.x = -Math.PI / 2;
-    strip.position.set(sx * (FIELD_HALF_W + 2.2), -0.01, 0);
+    strip.position.set(sx * (FIELD_HALF_W + 2.2), -0.02, 0);
     scene.add(strip);
   }
 
@@ -130,16 +141,18 @@ function makeField() {
   makeBench(FIELD_HALF_W + 3.2, -15, 18);
   makeBench(FIELD_HALF_W + 3.2, 15, 18);
 
-  const los = new THREE.Mesh(
-    new THREE.PlaneGeometry(YARDS.width - 2, 0.12),
-    new THREE.MeshBasicMaterial({ color: 0xffe000, transparent: true, opacity: 0.85, depthWrite: false })
-  );
-  los.rotation.x = -Math.PI / 2; los.position.set(0, 0.025, -20); scene.add(los);
-  const fd = new THREE.Mesh(
-    new THREE.PlaneGeometry(YARDS.width - 2, 0.12),
-    new THREE.MeshBasicMaterial({ color: 0xff2200, transparent: true, opacity: 0.85, depthWrite: false })
-  );
-  fd.rotation.x = -Math.PI / 2; fd.position.set(0, 0.028, -10); scene.add(fd);
+  const losMat = new THREE.MeshBasicMaterial({
+    color: 0xffe000, transparent: true, opacity: 0.85, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const fdMat = new THREE.MeshBasicMaterial({
+    color: 0xff2200, transparent: true, opacity: 0.85, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+  });
+  const los = new THREE.Mesh(new THREE.PlaneGeometry(YARDS.width - 2, 0.12), losMat);
+  los.rotation.x = -Math.PI / 2; los.position.set(0, 0.04, -20); los.renderOrder = 2; scene.add(los);
+  const fd = new THREE.Mesh(new THREE.PlaneGeometry(YARDS.width - 2, 0.12), fdMat);
+  fd.rotation.x = -Math.PI / 2; fd.position.set(0, 0.045, -10); fd.renderOrder = 3; scene.add(fd);
   return { los, fd };
 }
 const { los, fd } = makeField();
@@ -147,22 +160,29 @@ const { los, fd } = makeField();
 const CIRCLE_R = 0.55;
 const playerCircle = new THREE.Mesh(
   new THREE.RingGeometry(CIRCLE_R * 0.82, CIRCLE_R, 48),
-  new THREE.MeshBasicMaterial({ color: 0x2299ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x2299ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  })
 );
-playerCircle.rotation.x = -Math.PI / 2; playerCircle.position.y = 0.04; scene.add(playerCircle);
+playerCircle.rotation.x = -Math.PI / 2; playerCircle.position.y = 0.05; playerCircle.renderOrder = 4; scene.add(playerCircle);
 const circleFill = new THREE.Mesh(
   new THREE.CircleGeometry(CIRCLE_R * 0.82, 48),
-  new THREE.MeshBasicMaterial({ color: 0x1188ee, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x1188ee, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  })
 );
-circleFill.rotation.x = -Math.PI / 2; circleFill.position.y = 0.035; scene.add(circleFill);
+circleFill.rotation.x = -Math.PI / 2; circleFill.position.y = 0.048; circleFill.renderOrder = 4; scene.add(circleFill);
 
 const shadowMat = new THREE.MeshBasicMaterial({
   color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide,
+  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
 });
 const playerShadow = new THREE.Mesh(new THREE.CircleGeometry(0.45, 24), shadowMat);
 playerShadow.rotation.x = -Math.PI / 2;
 playerShadow.position.y = 0.03;
-playerShadow.renderOrder = 5;
+playerShadow.renderOrder = 1;
 scene.add(playerShadow);
 
 const player = {
@@ -187,7 +207,7 @@ const BASE_SPEED = 12;
 const TURBO_MULT = 1.7;
 const ACCEL = 48;
 const FRICTION = 30;
-const YAW_LERP = 12; // higher = snappier facing
+const YAW_RATE = 10; // rad/s exponential yaw follow rate
 
 // Nominal ground speeds the clips were authored for (m/s), used to sync timeScale
 const CLIP_SPEED = { run: 6.5, sprint: 9.5 };
@@ -318,8 +338,16 @@ async function loadPlayer() {
     },
     sampleNdc: () => {
       const v = new THREE.Vector3(player.x, 1.0, player.z).project(camera);
-      return { x: v.x, y: v.y, z: v.z, px: player.x, pz: player.z, mode: player.mode };
+      return {
+        x: v.x, y: v.y, z: v.z,
+        px: player.x, pz: player.z,
+        cx: camera.position.x, cy: camera.position.y, cz: camera.position.z,
+        lx: updateCamera._look ? updateCamera._look.x : 0,
+        lz: updateCamera._look ? updateCamera._look.z : 0,
+        mode: player.mode,
+      };
     },
+    step: (dt) => stepSimulation(dt),
   };
 }
 
@@ -329,9 +357,11 @@ loadPlayer().catch((err) => {
 });
 
 function dirFromInput() {
+  // Screen-relative strafe from the game cam (looking +Z / north):
+  // Three.js view has world +X on screen-LEFT and world -X on screen-RIGHT.
   let dx = 0, dz = 0;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) dx -= 1;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1;
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) dx += 1;   // screen-left
+  if (keys.has('KeyD') || keys.has('ArrowRight')) dx -= 1;  // screen-right
   if (keys.has('KeyW') || keys.has('ArrowUp')) dz += 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) dz -= 1;
   return { dx, dz };
@@ -399,11 +429,11 @@ function updatePlayer(dt) {
     player.targetYaw = Math.atan2(dx, dz); // 0 = +Z (north)
   }
 
-  // Smooth yaw
-  let dy = player.targetYaw - player.yaw;
-  while (dy > Math.PI) dy -= Math.PI * 2;
-  while (dy < -Math.PI) dy += Math.PI * 2;
-  player.yaw += dy * Math.min(1, YAW_LERP * dt);
+  // Smooth yaw (frame-rate independent exponential)
+  let dyaw = player.targetYaw - player.yaw;
+  while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+  while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+  player.yaw += dyaw * (1 - Math.exp(-YAW_RATE * dt));
 
   const speed = BASE_SPEED * (usingTurbo ? TURBO_MULT : 1);
   let tx = 0, tz = 0;
@@ -435,126 +465,139 @@ function updatePlayer(dt) {
     fd.position.z = Math.min(50, ballZ + 10);
   }
 
-  // Locomotion anim selection + foot-speed sync
+  // Locomotion with hysteresis so speed hovering at thresholds doesn't thrash crossfades
   const groundSpeed = Math.hypot(player.vx, player.vz);
   if (player.special === 'spin') {
     // keep spin
-  } else if (groundSpeed < 0.6 && !moving) {
-    setAction('idle', 0.25);
-    if (actions.idle) actions.idle.setEffectiveTimeScale(1);
-  } else if (usingTurbo || groundSpeed > BASE_SPEED * 1.15) {
-    setAction('sprint', 0.18);
-    if (actions.sprint) {
-      actions.sprint.setEffectiveTimeScale(THREE.MathUtils.clamp(groundSpeed / CLIP_SPEED.sprint, 0.75, 1.6));
-    }
   } else {
-    setAction('run', 0.18);
-    if (actions.run) {
-      actions.run.setEffectiveTimeScale(THREE.MathUtils.clamp(groundSpeed / CLIP_SPEED.run, 0.7, 1.55));
+    let want = 'run';
+    if (groundSpeed < 0.45 && !moving) want = 'idle';
+    else if (usingTurbo || groundSpeed > BASE_SPEED * 1.25) want = 'sprint';
+    else if (player.mode === 'sprint' && (usingTurbo || groundSpeed > BASE_SPEED * 0.95)) want = 'sprint';
+    else if (player.mode === 'idle' && groundSpeed < 0.9 && !moving) want = 'idle';
+    else want = groundSpeed < 0.45 && !moving ? 'idle' : 'run';
+
+    if (want === 'idle') {
+      setAction('idle', 0.28);
+      if (actions.idle) actions.idle.setEffectiveTimeScale(1);
+    } else if (want === 'sprint') {
+      setAction('sprint', 0.22);
+      if (actions.sprint) {
+        const ts = THREE.MathUtils.clamp(groundSpeed / CLIP_SPEED.sprint, 0.8, 1.45);
+        const cur = actions.sprint.getEffectiveTimeScale();
+        actions.sprint.setEffectiveTimeScale(cur + (ts - cur) * (1 - Math.exp(-8 * dt)));
+      }
+    } else {
+      setAction('run', 0.22);
+      if (actions.run) {
+        const ts = THREE.MathUtils.clamp(groundSpeed / CLIP_SPEED.run, 0.75, 1.4);
+        const cur = actions.run.getEffectiveTimeScale();
+        actions.run.setEffectiveTimeScale(cur + (ts - cur) * (1 - Math.exp(-8 * dt)));
+      }
     }
   }
 }
 
-// Game camera: high above, slightly behind (world-south of player). Same arcade angle,
-// tighter distance so #8 reads larger. Snappy XZ follow + velocity look-ahead so the
-// player stays near screen center-low and never runs off the bottom (or any edge).
+// Game camera: high above, slightly behind (world-south). Single controller —
+// exp-smoothed follow + mild velocity look-ahead. NO per-frame NDC spring
+// (that fought look-ahead and shook hard at 60–144Hz while screenshots looked fine).
 const CAM_HEIGHT = 10.4;
-const CAM_BACK = 11.5;       // height/back ≈ 0.90 — same pitch as old 14.5/16
+const CAM_BACK = 11.5;
 const LOOK_Y = 0.95;
-const LOOK_AHEAD = 5.5;      // along move / facing
-const LOOK_NORTH_BIAS = 2.0; // keeps player center-low when idle / running north
-const CAM_FOLLOW = 0.000001; // pow base → near-locked follow (was 0.001, lagged south)
-const LOOK_FOLLOW = 0.000001;
+const LOOK_AHEAD = 3.0;       // mild, along velocity / facing
+const LOOK_NORTH_BIAS = 4.5;  // frames player center-low from arcade cam
+const CAM_POS_RATE = 9;      // 1-exp(-k*dt) follow rates
+const CAM_LOOK_RATE = 10;
+
+function expAlpha(rate, dt) {
+  return 1 - Math.exp(-rate * dt);
+}
 
 function updateCamera(dt) {
   camera.up.set(0, 1, 0);
 
-  const ideal = new THREE.Vector3(player.x, CAM_HEIGHT, player.z - CAM_BACK);
-  const follow = 1 - Math.pow(CAM_FOLLOW, dt);
-  camera.position.lerp(ideal, follow);
+  const idealPos = updateCamera._idealPos || (updateCamera._idealPos = new THREE.Vector3());
+  idealPos.set(player.x, CAM_HEIGHT, player.z - CAM_BACK);
+  camera.position.lerp(idealPos, expAlpha(CAM_POS_RATE, dt));
 
   const spd = Math.hypot(player.vx, player.vz);
-  let ax, az;
+  let ax = 0, az = 1;
   if (spd > 0.8) {
     ax = player.vx / spd;
     az = player.vz / spd;
-  } else {
+  } else if (spd > 0.05 || keys.size) {
     ax = Math.sin(player.yaw);
     az = Math.cos(player.yaw);
   }
 
-  const look = new THREE.Vector3(
-    player.x + ax * LOOK_AHEAD,
+  const idealLook = updateCamera._idealLook || (updateCamera._idealLook = new THREE.Vector3());
+  // Look mostly north of player (center-low framing) with a little velocity lead.
+  // Keep lead modest so left/right screen motion matches world motion (no overshoot flip).
+  // No lateral look-ahead: ax lead put the player on the opposite side of
+  // screen-center while strafing, which felt like left/right were swapped.
+  idealLook.set(
+    player.x,
     LOOK_Y,
-    player.z + az * LOOK_AHEAD + LOOK_NORTH_BIAS,
+    player.z + az * LOOK_AHEAD * 0.4 + LOOK_NORTH_BIAS,
   );
-  if (!updateCamera._look) updateCamera._look = look.clone();
-  updateCamera._look.lerp(look, 1 - Math.pow(LOOK_FOLLOW, dt));
+  if (!updateCamera._look) updateCamera._look = idealLook.clone();
+  updateCamera._look.lerp(idealLook, expAlpha(CAM_LOOK_RATE, dt));
   camera.lookAt(updateCamera._look);
-
-  // Soft framing spring: keep #8 near screen center-low in every direction.
-  // Nudges look target when projection is sane so long south runs never leave frame.
-  if (!updateCamera._ndc) updateCamera._ndc = new THREE.Vector3();
-  const ndc = updateCamera._ndc.set(player.x, 1.0, player.z).project(camera);
-  const sane = ndc.z > -1 && ndc.z < 1 && Math.abs(ndc.x) < 1.5 && Math.abs(ndc.y) < 1.5;
-  if (sane) {
-    const TARGET_Y = -0.30; // center-low
-    const dy = ndc.y - TARGET_Y;
-    const dx = ndc.x;
-    // Dead-zone: only correct outside a small band
-    let nudged = false;
-    if (Math.abs(dy) > 0.12) {
-      // +look.z → player moves down on screen with this arcade cam
-      updateCamera._look.z += Math.max(-3.5, Math.min(3.5, dy * 7));
-      nudged = true;
-    }
-    if (Math.abs(dx) > 0.35) {
-      updateCamera._look.x += Math.max(-3.5, Math.min(3.5, dx * 6));
-      nudged = true;
-    }
-    // Hard edge rescue
-    if (ndc.y < -0.72 || ndc.y > 0.55 || Math.abs(ndc.x) > 0.82) {
-      updateCamera._look.x = player.x + dx * -2;
-      updateCamera._look.z = player.z + 4;
-      nudged = true;
-    }
-    if (nudged) camera.lookAt(updateCamera._look);
-  }
 }
 
 function syncMeshes() {
   playerRoot.position.set(player.x, 0, player.z);
   playerRoot.rotation.y = player.yaw + MODEL_FORWARD_YAW;
 
-  // Kill residual root motion on hips each frame
+  // Soft-hold hips to rest XZ (root tracks already stripped). Avoid hard snap pops.
   if (hipBone && hipRestLocal) {
-    hipBone.position.x = hipRestLocal.x;
-    hipBone.position.z = hipRestLocal.z;
+    hipBone.position.x += (hipRestLocal.x - hipBone.position.x) * 0.85;
+    hipBone.position.z += (hipRestLocal.z - hipBone.position.z) * 0.85;
   }
 
   playerCircle.position.x = player.x; playerCircle.position.z = player.z;
   circleFill.position.x = player.x; circleFill.position.z = player.z;
-  playerCircle.scale.setScalar(1 + Math.sin(performance.now() * 0.01) * 0.03);
   playerShadow.position.x = player.x;
   playerShadow.position.z = player.z;
 }
 
 let last = performance.now(), frames = 0, fpsT = 0;
-function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now; frames++; fpsT += dt;
-  if (fpsT >= 0.5) { fpsEl.textContent = `${Math.round(frames / fpsT)} fps`; frames = 0; fpsT = 0; }
+let rafStarted = false;
+
+function stepSimulation(dt) {
+  // Clamp: avoid huge hits on tab-focus; avoid zero/negative
+  dt = Math.min(0.05, Math.max(0, dt));
   updatePlayer(dt);
   if (mixer) mixer.update(dt);
   updateCamera(dt);
   syncMeshes();
+}
+
+function frame(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;
+  if (dt < 0) dt = 0;
+  frames++; fpsT += dt;
+  if (fpsT >= 0.5) { fpsEl.textContent = `${Math.round(frames / fpsT)} fps`; frames = 0; fpsT = 0; }
+  stepSimulation(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+
+if (!rafStarted) {
+  rafStarted = true;
+  requestAnimationFrame(frame);
+}
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight, false);
+  applySize();
+});
+
+// Test hook: drive sim at fixed/variable dt without relying on display refresh
+Object.defineProperty(window, '__tbStep', {
+  configurable: true,
+  get: () => (dt) => { stepSimulation(dt); return window.__tb ? window.__tb.sampleNdc() : null; },
 });
