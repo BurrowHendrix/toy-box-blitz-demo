@@ -207,12 +207,29 @@ let spine01Bone = null;
 let carryBones = [];
 
 const BALL_ARM = /^(RightShoulder|RightArm|RightForeArm|RightHand)$/i;
-const LOCO_NAMES = ['jog', 'run', 'runVar', 'sprint'];
+const LOCO_NAMES = ['jog', 'mid', 'run', 'runVar', 'runVar2', 'sprint', 'headDown'];
+
+// cycle = one L+R foot cycle (seconds at timeScale 1). plant = phase of first hip-Y plant.
+// refSpeed = game speed at which the clip should play at 1x (anti-skate).
+const CLIP_META = {
+  jog:      { cycle: 1.000, plant: 0.467, refSpeed: 5.2 },
+  mid:      { cycle: 0.800, plant: 0.084, refSpeed: 7.6 },
+  run:      { cycle: 0.467, plant: 0.143, refSpeed: 9.6 },
+  runVar:   { cycle: 0.533, plant: 0.501, refSpeed: 10.4 },
+  runVar2:  { cycle: 0.700, plant: 0.143, refSpeed: 9.0 },
+  sprint:   { cycle: 0.567, plant: 0.529, refSpeed: 14.2 },
+  headDown: { cycle: 0.500, plant: 0.466, refSpeed: 14.8 },
+};
+
 
 const loco = {
   phase: 0,
   varW: 0,
+  varIdx: 0,
+  sprintVar: 0,
   varTimer: 2.8,
+  turnT: 0,
+  turnDir: 0,
   startT: 0,
   stopT: 0,
   plantT: 0,
@@ -241,14 +258,17 @@ function findClip(anims, ...names) {
   return null;
 }
 
-function stripRootMotion(clip) {
-  // Drop translation tracks on hips / armature / root so character stays planted under playerRoot
+function stripRootMotion(clip, { yaw = false } = {}) {
+  // Drop translation tracks on hips / armature / root so character stays planted under playerRoot.
+  // yaw: also drop root/hip rotation so one-shot turns don't double-rotate with player.yaw.
   const keep = [];
   for (const track of clip.tracks) {
     const name = track.name;
     const isPos = name.endsWith('.position');
+    const isRot = name.endsWith('.quaternion');
     const isRootish = /hips|armature|root|pelvis|mixamorig:hips/i.test(name.split('.')[0]);
     if (isPos && isRootish) continue;
+    if (yaw && isRot && isRootish) continue;
     keep.push(track);
   }
   if (keep.length !== clip.tracks.length) {
@@ -400,38 +420,72 @@ function zeroLocoWeights() {
 }
 
 function locoWeights(speed) {
-  // Phase-synced blend space: jog -> run -> sprint, weights by ground speed
-  const jog = 5.5, run = 11.5, sprint = 17.5;
-  const w = { jog: 0, run: 0, sprint: 0 };
-  if (speed <= jog) w.jog = 1;
-  else if (speed < run) {
-    const t = (speed - jog) / (run - jog);
-    w.jog = 1 - t; w.run = t;
-  } else if (speed < sprint) {
-    const t = (speed - run) / (sprint - run);
+  // Phase-synced blend space: jog -> mid (Run 3) -> run -> sprint
+  const w = { jog: 0, mid: 0, run: 0, sprint: 0 };
+  const j = 5.5, m = 8.8, r = 12.2, s = 17.5;
+  if (speed <= j) w.jog = 1;
+  else if (speed < m) {
+    const t = (speed - j) / (m - j);
+    w.jog = 1 - t; w.mid = t;
+  } else if (speed < r) {
+    const t = (speed - m) / (r - m);
+    w.mid = 1 - t; w.run = t;
+  } else if (speed < s) {
+    const t = (speed - r) / (s - r);
     w.run = 1 - t; w.sprint = t;
   } else w.sprint = 1;
   return w;
 }
 
-function applyLocoWeights(base, varW) {
-  const runA = (base.run || 0) * (1 - varW);
-  const runB = (base.run || 0) * varW;
-  const map = { jog: base.jog || 0, run: runA, runVar: runB, sprint: base.sprint || 0 };
+function applyLocoWeights(base) {
+  const runW = base.run || 0;
+  const spW = base.sprint || 0;
+  const idx = loco.varIdx % 3;
+  const runParts = [0, 0, 0];
+  runParts[idx] = runW;
+  const head = spW * (loco.sprintVar ? 0.65 : 0.15);
+  const map = {
+    jog: base.jog || 0,
+    mid: base.mid || 0,
+    run: runParts[0],
+    runVar: runParts[1],
+    runVar2: runParts[2],
+    sprint: spW - head,
+    headDown: head,
+  };
   for (const [n, w] of Object.entries(map)) {
     if (actions[n]) actions[n].setEffectiveWeight(w);
   }
+  return map;
 }
 
 function syncLocoPhase() {
+  const ph = ((loco.phase % 1) + 1) % 1;
   for (const n of LOCO_NAMES) {
     const a = actions[n];
-    if (!a) continue;
-    const dur = a.getClip().duration || 1;
+    const meta = CLIP_META[n];
+    if (!a || !meta) continue;
+    const local = (ph + meta.plant) % 1;
     a.paused = true;
-    a.time = (loco.phase % 1) * dur;
+    a.time = local * meta.cycle;
     a.enabled = true;
   }
+}
+
+function advancePhase(dt, speed, weights) {
+  let stride = 0, wsum = 0;
+  for (const n of LOCO_NAMES) {
+    const w = weights[n] || 0;
+    if (w <= 1e-4) continue;
+    const meta = CLIP_META[n];
+    if (!meta) continue;
+    stride += w * meta.refSpeed * meta.cycle;
+    wsum += w;
+  }
+  if (wsum < 1e-4) stride = CLIP_META.run.refSpeed * CLIP_META.run.cycle;
+  else stride /= wsum;
+  const spd = Math.max(speed, 0.15);
+  loco.phase = (loco.phase + dt * spd / Math.max(stride, 0.4)) % 1;
 }
 
 function wrapPi(a) {
@@ -443,7 +497,7 @@ function wrapPi(a) {
 async function loadPlayer() {
   statusEl.textContent = 'Loading Meshy #8…';
   const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync('../meshy/assets/player.glb?v=meshy-v1');
+  const gltf = await loader.loadAsync('./assets/player.glb?v=meshy-v9c');
   const model = gltf.scene;
 
   // Normalize height to ~1.9 m, feet on ground
@@ -495,29 +549,36 @@ async function loadPlayer() {
     return clip;
   });
 
-  const idleClip = findClip(clips, 'idle') || clips[0];
-  const runSrc = findClip(clips, 'runfast', 'run') || clips[1] || idleClip;
-  const sprintSrc = findClip(clips, 'lean_forward_sprint', 'sprint') || runSrc;
-  const spinClip = findClip(clips, 'quick_step_and_spin_dodge', 'spin', 'dodge') || null;
+  const pick = (...names) => findClip(clips, ...names);
+  const idleClip = pick('idle') || clips[0];
+  const spinClip = pick('quick_step_and_spin_dodge', 'spin', 'dodge') || null;
 
+  // Real Meshy library clips (not derived from the original 4).
   // Lower+free-arm locomotion; ball-carry arm is a separate upper-body layer.
-  const runClip = stripBallArm(runSrc.clone());
-  const sprintClip = stripBallArm(sprintSrc.clone());
-  const jogClip = stripBallArm(amplitudeVariant(runSrc, 0.62, 'JogDerived'));
-  const runVarClip = stripBallArm(twistVariant(runSrc, 'RunVarDerived'));
   const idleBody = stripBallArm(idleClip.clone());
-
-  const startClip = stripBallArm(clipFromPoses(
-    'StartAccel', 0.34,
-    poseFromClip(idleBody, 0),
-    poseFromClip(runClip, 0.0),
-  ));
-  const stopClip = stripBallArm(clipFromPoses(
-    'StopDecel', 0.40,
-    poseFromClip(runClip, 0.0),
-    poseFromClip(idleBody, 0),
-  ));
-  const plantClip = stripBallArm(holdPoseClip(runClip, 0.0, 'CutPlant', 0.22));
+  const jogClip = stripBallArm((pick('quick_walk') || pick('runfast')).clone());
+  const midClip = stripBallArm((pick('run_03') || pick('runfast')).clone());
+  const runClip = stripBallArm((pick('runfast') || clips[1] || idleClip).clone());
+  const runVarClip = stripBallArm((pick('run_fast_2', 'runfast_2') || pick('runfast')).clone());
+  const runVar2Clip = stripBallArm((pick('run_02') || pick('runfast')).clone());
+  const sprintClip = stripBallArm((pick('lean_forward_sprint', 'sprint') || pick('runfast')).clone());
+  const headDownClip = stripBallArm((pick('male_head_down_charge', 'head_down') || pick('lean_forward_sprint')).clone());
+  const startSrc = (pick('standard_forward_charge') || pick('runfast')).clone();
+  stripRootMotion(startSrc, { yaw: true });
+  const startClip = stripBallArm(startSrc);
+  const stopSrc = (pick('sprint_and_sudden_stop') || pick('idle')).clone();
+  stripRootMotion(stopSrc, { yaw: true });
+  const stopClip = stripBallArm(stopSrc);
+  const plantSrc = (pick('run_sharp_turn_right') || pick('runfast')).clone();
+  stripRootMotion(plantSrc, { yaw: true });
+  // Soften the cinematic fold-over so a cut stays readable from the game camera.
+  const plantClip = stripBallArm(amplitudeVariant(plantSrc, 0.42, 'plant_soft'));
+  const turnLSrc = (pick('run_turn_left') || plantSrc).clone();
+  stripRootMotion(turnLSrc, { yaw: true });
+  const turnLClip = stripBallArm(turnLSrc);
+  const turnRSrc = (pick('run_turn_right') || plantSrc).clone();
+  stripRootMotion(turnRSrc, { yaw: true });
+  const turnRClip = stripBallArm(turnRSrc);
   const carryClip = (() => {
     const pose = poseFromClip(idleClip, 0);
     const tracks = [];
@@ -534,12 +595,17 @@ async function loadPlayer() {
 
   actions.idle = makeAction(idleBody, { weight: 1 });
   actions.jog = makeAction(jogClip, { paused: true, weight: 0 });
+  actions.mid = makeAction(midClip, { paused: true, weight: 0 });
   actions.run = makeAction(runClip, { paused: true, weight: 0 });
   actions.runVar = makeAction(runVarClip, { paused: true, weight: 0 });
+  actions.runVar2 = makeAction(runVar2Clip, { paused: true, weight: 0 });
   actions.sprint = makeAction(sprintClip, { paused: true, weight: 0 });
+  actions.headDown = makeAction(headDownClip, { paused: true, weight: 0 });
   actions.start = makeAction(startClip, { loop: THREE.LoopOnce, weight: 0 });
   actions.stop = makeAction(stopClip, { loop: THREE.LoopOnce, weight: 0 });
   actions.plant = makeAction(plantClip, { loop: THREE.LoopOnce, weight: 0 });
+  actions.turnL = makeAction(turnLClip, { loop: THREE.LoopOnce, weight: 0 });
+  actions.turnR = makeAction(turnRClip, { loop: THREE.LoopOnce, weight: 0 });
   actions.carry = makeAction(carryClip, { weight: 1 });
   if (spinClip) actions.spin = makeAction(spinClip, { loop: THREE.LoopOnce, weight: 0 });
 
@@ -547,7 +613,7 @@ async function loadPlayer() {
   loco.mode = 'idle';
 
   modelReady = true;
-  statusEl.textContent = 'Ready — locomotion set (jog/run/sprint blend)';
+  statusEl.textContent = 'Ready — Meshy loco set (real jog/run/sprint/turns)';
   setTimeout(() => { statusEl.style.opacity = '0'; }, 2500);
 
   window.__tb = {
@@ -603,12 +669,14 @@ function resetPlayer() {
     if (actions.start) actions.start.setEffectiveWeight(0);
     if (actions.stop) actions.stop.setEffectiveWeight(0);
     if (actions.plant) actions.plant.setEffectiveWeight(0);
+    if (actions.turnL) actions.turnL.setEffectiveWeight(0);
+    if (actions.turnR) actions.turnR.setEffectiveWeight(0);
     actions.idle.reset();
     actions.idle.setEffectiveWeight(1);
     currentAction = actions.idle;
     player.mode = 'idle';
     loco.mode = 'idle';
-    loco.startT = loco.stopT = loco.plantT = 0;
+    loco.startT = loco.stopT = loco.plantT = loco.turnT = 0;
   }
 }
 
@@ -724,6 +792,8 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     fadeWeight(actions.start, 0, dt, 16);
     fadeWeight(actions.stop, 0, dt, 16);
     fadeWeight(actions.plant, 0, dt, 16);
+    fadeWeight(actions.turnL, 0, dt, 16);
+    fadeWeight(actions.turnR, 0, dt, 16);
     fadeWeight(actions.carry, 0, dt, 12); // full-body spin, no carry mask
     if (actions.spin) {
       actions.spin.paused = false;
@@ -737,11 +807,12 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
   if (actions.spin) fadeWeight(actions.spin, 0, dt, 14);
   fadeWeight(actions.carry, 1, dt, 8);
 
-  // Variation: swap run-cycle flavor every few seconds at a foot-plant (phase wrap)
+  // Variation: cycle run flavors (RunFast / run_fast_2 / Run_02) at a foot-plant
   loco.varTimer -= dt;
   if (loco.varTimer <= 0 && loco.phase < 0.08) {
-    loco.varW = loco.varW > 0.5 ? 0 : 1;
-    loco.varTimer = 2.4 + Math.random() * 1.6;
+    loco.varIdx = (loco.varIdx + 1) % 3;
+    loco.sprintVar = loco.sprintVar ? 0 : 1;
+    loco.varTimer = 2.2 + Math.random() * 1.4;
   }
 
   const wantMove = moving && player.special !== 'td';
@@ -750,10 +821,11 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
   loco.prevMoving = wantMove;
 
   const sharpCut = wantMove && Math.abs(headingErr) > 1.15 && groundSpeed > 3.2;
+  const mildTurn = wantMove && !sharpCut && Math.abs(headingErr) > 0.55 && groundSpeed > 3.0;
 
   if (justStarted && loco.mode !== 'start') {
     loco.mode = 'start';
-    loco.startT = actions.start ? (actions.start.getClip().duration || 0.34) : 0.34;
+    loco.startT = actions.start ? Math.min(0.70, actions.start.getClip().duration || 0.63) : 0.63;
     if (actions.start) {
       actions.start.reset();
       actions.start.paused = false;
@@ -763,27 +835,56 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     fadeWeight(actions.idle, 0, dt, 18);
     fadeWeight(actions.stop, 0, dt, 18);
     player.mode = 'start';
-  } else if (sharpCut && loco.mode === 'loco') {
+  } else if (sharpCut && (loco.mode === 'loco' || loco.mode === 'turn')) {
     loco.mode = 'plant';
-    loco.plantT = 0.20;
-    loco.phase = (loco.phase < 0.25 || loco.phase > 0.75) ? 0 : 0.5;
+    loco.plantT = 0.30;
+    loco.turnDir = headingErr > 0 ? 1 : -1;
+    // Run_Sharp_Turn_Right is a cinematic dive from the game camera; use it only
+    // as a light overlay and drive the cut with the directional run-turn clips.
     if (actions.plant) {
       actions.plant.reset();
       actions.plant.paused = false;
-      actions.plant.setEffectiveWeight(1);
+      actions.plant.time = 0.70;
+      actions.plant.setEffectiveWeight(0.12);
       actions.plant.play();
     }
+    const turnAct = loco.turnDir > 0 ? actions.turnL : actions.turnR;
+    const other = loco.turnDir > 0 ? actions.turnR : actions.turnL;
+    if (other) other.setEffectiveWeight(0);
+    if (turnAct) {
+      turnAct.reset();
+      turnAct.paused = false;
+      turnAct.time = 0.18;
+      turnAct.setEffectiveWeight(0.48);
+      turnAct.play();
+    }
     player.mode = 'plant';
+  } else if (mildTurn && loco.mode === 'loco') {
+    loco.mode = 'turn';
+    loco.turnT = 0.50;
+    loco.turnDir = headingErr > 0 ? 1 : -1;
+    const turnAct = loco.turnDir > 0 ? actions.turnL : actions.turnR;
+    if (turnAct) {
+      turnAct.reset();
+      turnAct.paused = false;
+      turnAct.time = 0.15;
+      turnAct.setEffectiveWeight(0.5);
+      turnAct.play();
+    }
+    player.mode = loco.turnDir > 0 ? 'turnL' : 'turnR';
   } else if (justStopped && groundSpeed > 0.8 && loco.mode !== 'idle') {
     loco.mode = 'stop';
-    loco.stopT = actions.stop ? (actions.stop.getClip().duration || 0.4) : 0.4;
+    loco.stopT = actions.stop ? Math.min(1.25, actions.stop.getClip().duration || 2) : 1.1;
     if (actions.stop) {
       actions.stop.reset();
       actions.stop.paused = false;
+      actions.stop.setEffectiveTimeScale(1.15);
       actions.stop.setEffectiveWeight(1);
       actions.stop.play();
     }
     zeroLocoWeights();
+    if (actions.turnL) actions.turnL.setEffectiveWeight(0);
+    if (actions.turnR) actions.turnR.setEffectiveWeight(0);
     player.mode = 'stop';
   }
 
@@ -791,6 +892,9 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     loco.startT -= dt;
     fadeWeight(actions.idle, 0, dt, 14);
     fadeWeight(actions.start, 1, dt, 16);
+    fadeWeight(actions.turnL, 0, dt, 16);
+    fadeWeight(actions.turnR, 0, dt, 16);
+    fadeWeight(actions.plant, 0, dt, 16);
     zeroLocoWeights();
     if (loco.startT <= 0) {
       fadeWeight(actions.start, 0, dt, 18);
@@ -799,14 +903,42 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     }
   } else if (loco.mode === 'plant') {
     loco.plantT -= dt;
-    fadeWeight(actions.plant, 1, dt, 16);
+    fadeWeight(actions.plant, 0.12, dt, 14);
     fadeWeight(actions.start, 0, dt, 16);
-    const base = locoWeights(groundSpeed);
-    applyLocoWeights(base, loco.varW);
-    // keep legs at the planted contact while the cut plays
+    const turnAct = loco.turnDir > 0 ? actions.turnL : actions.turnR;
+    const other = loco.turnDir > 0 ? actions.turnR : actions.turnL;
+    fadeWeight(turnAct, 0.48, dt, 14);
+    fadeWeight(other, 0, dt, 16);
+    const plantBase = locoWeights(Math.max(groundSpeed, 6));
+    const plantW = applyLocoWeights(plantBase);
+    for (const n of LOCO_NAMES) {
+      if (actions[n]) actions[n].setEffectiveWeight((plantW[n] || 0) * 0.72);
+    }
+    advancePhase(dt, Math.max(groundSpeed, 6), plantW);
     syncLocoPhase();
     if (loco.plantT <= 0) {
-      fadeWeight(actions.plant, 0, dt, 14);
+      fadeWeight(actions.plant, 0, dt, 12);
+      fadeWeight(turnAct, 0, dt, 12);
+      loco.mode = 'loco';
+    }
+  } else if (loco.mode === 'turn') {
+    loco.turnT -= dt;
+    const turnAct = loco.turnDir > 0 ? actions.turnL : actions.turnR;
+    const other = loco.turnDir > 0 ? actions.turnR : actions.turnL;
+    fadeWeight(turnAct, 0.5, dt, 14);
+    fadeWeight(other, 0, dt, 16);
+    fadeWeight(actions.plant, 0, dt, 16);
+    fadeWeight(actions.start, 0, dt, 16);
+    const base = locoWeights(Math.max(groundSpeed, 6));
+    const weights = applyLocoWeights(base);
+    // keep a bit of loco underneath the turn
+    for (const n of LOCO_NAMES) {
+      if (actions[n]) actions[n].setEffectiveWeight((weights[n] || 0) * 0.35);
+    }
+    advancePhase(dt, groundSpeed, weights);
+    syncLocoPhase();
+    if (loco.turnT <= 0 || Math.abs(headingErr) < 0.18) {
+      fadeWeight(turnAct, 0, dt, 12);
       loco.mode = 'loco';
     }
   } else if (loco.mode === 'stop') {
@@ -814,6 +946,8 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     fadeWeight(actions.stop, 1, dt, 14);
     fadeWeight(actions.start, 0, dt, 16);
     fadeWeight(actions.plant, 0, dt, 16);
+    fadeWeight(actions.turnL, 0, dt, 16);
+    fadeWeight(actions.turnR, 0, dt, 16);
     zeroLocoWeights();
     if (loco.stopT <= 0 || groundSpeed < 0.35) {
       fadeWeight(actions.stop, 0, dt, 10);
@@ -828,24 +962,33 @@ function updateLocomotion(dt, { moving, usingTurbo, groundSpeed, headingErr }) {
     fadeWeight(actions.start, 0, dt, 12);
     fadeWeight(actions.stop, 0, dt, 10);
     fadeWeight(actions.plant, 0, dt, 12);
+    fadeWeight(actions.turnL, 0, dt, 12);
+    fadeWeight(actions.turnR, 0, dt, 12);
     zeroLocoWeights();
   } else {
     loco.mode = 'loco';
     const base = locoWeights(Math.max(groundSpeed, wantMove ? 4.2 : groundSpeed));
-    const cadJog = 1.55, cadRun = 2.15, cadSprint = 2.65;
-    const cadence = (base.jog * cadJog) + (base.run * cadRun) + (base.sprint * cadSprint);
-    loco.phase = (loco.phase + dt * cadence) % 1;
-    applyLocoWeights(base, loco.varW);
+    if (usingTurbo) {
+      base.sprint = Math.max(base.sprint, 0.55);
+      base.run *= 0.6; base.mid *= 0.4; base.jog = 0;
+      const s = base.jog + base.mid + base.run + base.sprint || 1;
+      base.jog /= s; base.mid /= s; base.run /= s; base.sprint /= s;
+    }
+    const weights = applyLocoWeights(base);
+    advancePhase(dt, Math.max(groundSpeed, wantMove ? 4.2 : groundSpeed), weights);
     syncLocoPhase();
     fadeWeight(actions.idle, 0, dt, 12);
     fadeWeight(actions.start, 0, dt, 14);
     fadeWeight(actions.stop, 0, dt, 14);
     fadeWeight(actions.plant, 0, dt, 12);
+    fadeWeight(actions.turnL, 0, dt, 12);
+    fadeWeight(actions.turnR, 0, dt, 12);
     player.mode = base.sprint > 0.55 ? 'sprint' : (base.jog > 0.55 ? 'jog' : 'run');
   }
 
   // Banking / lean into turns (additive upper-body after mixer in syncMeshes)
-  const leanTarget = THREE.MathUtils.clamp(-headingErr * 0.55 - loco.yawRate * 0.12, -0.42, 0.42);
+  const leanScale = (loco.mode === 'plant' || loco.mode === 'turn') ? 0.18 : 0.38;
+  const leanTarget = THREE.MathUtils.clamp(-headingErr * leanScale - loco.yawRate * 0.08, -0.22, 0.22);
   loco.lean += (leanTarget - loco.lean) * (1 - Math.exp(-9 * dt));
 }
 
@@ -907,15 +1050,17 @@ function syncMeshes() {
   }
 
   // Additive bank into turns: roll spine toward the cut (game-cam readable).
-  const bank = loco.mode === 'spin' ? 0 : loco.lean;
-  const plantDip = loco.mode === 'plant' ? 0.18 : 0;
+  const bank = (loco.mode === 'spin' || loco.mode === 'plant') ? 0 : loco.lean * (loco.mode === 'turn' ? 0.4 : 1);
+  // Game camera looks down from the south; authored forward lean reads as a dive
+  // on cuts. Nudge the torso back toward upright after the mixer.
+  const upright = (loco.mode === 'plant' || loco.mode === 'turn') ? 0.20 : (loco.mode === 'loco' || loco.mode === 'start' ? 0.08 : 0);
   if (spineBone) {
     spineBone.rotation.z += bank * 0.75;
-    spineBone.rotation.x += plantDip;
+    spineBone.rotation.x -= upright;
   }
   if (spine01Bone) {
     spine01Bone.rotation.z += bank * 0.55;
-    spine01Bone.rotation.x += plantDip * 0.5;
+    spine01Bone.rotation.x -= upright * 0.6;
   }
 
   playerCircle.position.x = player.x; playerCircle.position.z = player.z;
